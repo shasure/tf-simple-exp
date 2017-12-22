@@ -10,8 +10,8 @@ from tensorflow.examples.tutorials.mnist import input_data
 import utils
 import matplotlib.pyplot as plt
 
-tf.flags.DEFINE_string('data_dir', '/home/zsy/datasets/mnist-data', 'mnist data')
-tf.flags.DEFINE_string('train_dir', '/home/zsy/train_dir/gan-mnist', 'events and ckpt dir')
+tf.flags.DEFINE_string('data_dir', '/datasets/mnist-data', 'mnist data')
+tf.flags.DEFINE_string('train_dir', '/train_dir/gan-mnist', 'events and ckpt dir')
 tf.flags.DEFINE_integer('batch_size', 128, 'batch size m')
 tf.flags.DEFINE_boolean('train', True, 'if training')
 tf.flags.DEFINE_integer('num_steps', 30000, 'traing steps')
@@ -67,20 +67,21 @@ class GANmnist(object):
         # merge_all should behind all summaries
         summary_op = tf.summary.merge_all()
 
-        opt = tf.train.AdamOptimizer()
+        opt_d = tf.train.AdamOptimizer()
+        opt_g = tf.train.AdamOptimizer()
         param_d = [v for v in tf.trainable_variables() if not v.name.startswith('generator')]
         print('param_d', [v.name for v in param_d])
         grads_d = tf.gradients(d_loss, param_d)
         param_g = [v for v in tf.trainable_variables() if not v.name.startswith('discriminator')]
         print('param_g', [v.name for v in param_g])
         grads_g = tf.gradients(g_loss, param_g)
-        train_op_d = opt.apply_gradients(zip(grads_d, param_d), global_step=global_step)
+        train_op_d = opt_d.apply_gradients(zip(grads_d, param_d), global_step=global_step)
         with tf.Graph.control_dependencies(tf.get_default_graph(), [train_op_d]):
-            train_op_g = opt.apply_gradients(zip(grads_g, param_g))
+            train_op_g = opt_g.apply_gradients(zip(grads_g, param_g))
 
         with tf.Session() as sess:
             i = 0
-            utils.init_or_load_var(None, sess, None, global_step)
+            utils.init_or_load_var(None, sess, None, global_step, initializer=tf.random_normal_initializer(stddev=0.02))
             for local_step in range(FLAGS.num_steps):
                 batch_x, _ = self.mnist.train.next_batch(FLAGS.batch_size)
                 feed_dict = {self.x: batch_x}

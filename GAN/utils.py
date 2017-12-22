@@ -20,13 +20,20 @@ class NetBuilder(object):
         :param scope: variable scope
         :return: output units of the full connection layer
         """
-        with tf.variable_scope(scope):
+        with tf.variable_scope(scope, default_name='affine'):
             weight = tf.get_variable('weight', [num_input_units, num_output_units])
             bias = tf.get_variable('bias', [num_output_units])
             xw_plus_b = tf.nn.xw_plus_b(input_layer, weight, bias)
             if activation:
                 return activation(xw_plus_b)
             return xw_plus_b
+
+    def conv2d_trans(self, input, kernel_shape, strides_shape, output_shape, scope=None):
+        # NHWC
+        with tf.variable_scope(scope, default_name='conv2d_trans'):
+            filters = tf.get_variable(name='trans_conv_filters', shape=kernel_shape + [output_shape[-1], input.shape[-1]])
+            output = tf.nn.conv2d_transpose(input, filters, output_shape=output_shape, strides=[1, strides_shape[0], strides_shape[1], 1])
+            return output
 
 
 def xavier_init(shape):
