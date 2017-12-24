@@ -121,7 +121,7 @@ class DCGANmnist(object):
 
         with tf.Session() as sess:
             index = 0
-            utils.init_or_load_var(None, sess, None, global_step)
+            utils.init_or_load_var(None, sess, None, global_step, initializer=tf.random_normal_initializer(stddev=0.02))
             for local_step in range(FLAGS.num_steps):
                 batch_x, _ = self.mnist.train.next_batch(FLAGS.batch_size)
                 feed_dict = {self.x: batch_x}
