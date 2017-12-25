@@ -14,7 +14,7 @@ import numpy as np
 from datetime import datetime
 
 tf.flags.DEFINE_string('data_dir', '/home/zsy/datasets/mnist-data', 'mnist data')
-tf.flags.DEFINE_string('train_dir', '/home/zsy/train_dir/vae-mnist', 'events and ckpt dir')
+tf.flags.DEFINE_string('train_dir', '/home/zsy/train_dir/cvae-mnist', 'events and ckpt dir')
 tf.flags.DEFINE_integer('batch_size', 64, 'M in VAE')
 tf.flags.DEFINE_boolean('train', True, 'if training')
 tf.flags.DEFINE_boolean('p_sampling', False, 'if sampling when reconstruct X')
@@ -53,11 +53,12 @@ def xavier_init(shape):
     return tf.random_normal(shape=shape, stddev=1. / tf.sqrt(shape[0] / 2.))
 
 
-class VAEMnist(object):
+class CVAEMnist(object):
     def __init__(self):
         # only use mnist.train，do not need labels
         self.mnist = self.read_data()
         self.input_dim = self.mnist.train.images.shape[1]
+        self.y_dim = self.mnist.train.labels.shape[1]  # add label info
         self.batch_size = FLAGS.batch_size
         self.num_steps = FLAGS.num_steps
         self.e_hidden1 = 512
@@ -73,11 +74,13 @@ class VAEMnist(object):
 
     def inference(self, istrain=True):
         self.inputx = tf.placeholder(tf.float32, [None, self.input_dim])
+        self.inputy = tf.placeholder(tf.float32, [None, self.y_dim])
         self.randz = tf.placeholder(tf.float32, [None, self.latent_dim])
-        # q(z|x)
-        e_hidden_w1 = tf.Variable(xavier_init([self.input_dim, self.e_hidden1]))
+        # q(z|x,y)
+        e_hidden_w1 = tf.Variable(xavier_init([self.input_dim + self.y_dim, self.e_hidden1]))
         e_hidden_b1 = tf.Variable(xavier_init([self.e_hidden1]))
-        e_h = tf.nn.tanh(tf.nn.xw_plus_b(self.inputx, e_hidden_w1, e_hidden_b1))
+        concat_xy = tf.concat([self.inputx, self.inputy], axis=1)
+        e_h = tf.nn.tanh(tf.nn.xw_plus_b(concat_xy, e_hidden_w1, e_hidden_b1))
 
         e_hidden_w2 = tf.Variable(xavier_init([self.e_hidden1, self.latent_dim]))
         e_hidden_b2 = tf.Variable(xavier_init([self.latent_dim]))
@@ -93,10 +96,11 @@ class VAEMnist(object):
 
         z = tf.add(e_mean, tf.multiply(tf.exp(e_logvar / 2), epsilon))
 
-        # p(x|z)
-        d_hidden_w1 = tf.Variable(xavier_init([self.latent_dim, self.d_hidden1]))
+        # p(x|z,y)
+        d_hidden_w1 = tf.Variable(xavier_init([self.latent_dim + self.y_dim, self.d_hidden1]))
         d_hidden_b1 = tf.Variable(xavier_init([self.d_hidden1]))
-        d_h = tf.nn.tanh(tf.nn.xw_plus_b(z, d_hidden_w1, d_hidden_b1))
+        concat_zy = tf.concat([z, self.inputy], axis=1)
+        d_h = tf.nn.tanh(tf.nn.xw_plus_b(concat_zy, d_hidden_w1, d_hidden_b1))
 
         if not FLAGS.p_sampling:
             d_hidden_w2 = tf.Variable(xavier_init([self.d_hidden1, self.input_dim]))
@@ -125,7 +129,8 @@ class VAEMnist(object):
             kl_loss = -0.5 * tf.reduce_sum(1 + e_logvar - tf.square(e_mean) - tf.exp(e_logvar), 1)
             return reconstruction, kl_loss
         else:  # generate
-            d_h_gen = tf.nn.tanh(tf.nn.xw_plus_b(self.randz, d_hidden_w1, d_hidden_b1))
+            concat_randzy = tf.concat([self.randz, self.inputy], axis=1)
+            d_h_gen = tf.nn.tanh(tf.nn.xw_plus_b(concat_randzy, d_hidden_w1, d_hidden_b1))
             reconstr_gen = tf.nn.sigmoid(tf.nn.xw_plus_b(d_h_gen, d_hidden_w2, d_hidden_b2))
             tf.summary.image('gen_image', reconstr_gen, 10)
             return reconstr_gen
@@ -169,9 +174,9 @@ class VAEMnist(object):
             init_or_load_var(saver, sess, FLAGS.train_dir, global_step)
             for step in range(self.num_steps):
                 # feed dict
-                batch_x, _ = self.mnist.train.next_batch(self.batch_size)
+                batch_x, batch_y = self.mnist.train.next_batch(self.batch_size)
                 # print(batch_x[0])
-                feed_dict = {self.inputx: batch_x}
+                feed_dict = {self.inputx: batch_x, self.inputy: batch_y}
                 loss, _, g_step = sess.run([loss_op, train_op, global_step], feed_dict=feed_dict)
                 if g_step % 100 == 0:
                     # loss
@@ -186,6 +191,10 @@ class VAEMnist(object):
                     saver.save(sess, os.path.join(FLAGS.train_dir, 'model.ckpt'), g_step)
 
     def generate(self):
+        dtime = datetime.now().strftime('%d_%m_%Y_%H_%M')
+        fig_dir = os.path.join(FLAGS.train_dir, 'out')
+        if not tf.gfile.Exists(fig_dir):
+            tf.gfile.MakeDirs(fig_dir)
         gen_x = self.inference(istrain=False)
         n = 20
         x_axis = np.linspace(-3, 3, n)
@@ -196,19 +205,22 @@ class VAEMnist(object):
         canvas = np.empty((28 * n, 28 * n))
         with tf.Session(config=self.config) as sess:
             init_or_load_var(saver, sess, FLAGS.train_dir, global_step)
-            for i, xi in enumerate(x_axis):
-                for j, yi in enumerate(y_axis):
-                    randz = np.array([[xi, yi]] * 1)
-                    x = sess.run(gen_x, feed_dict={self.randz: randz})
-                    canvas[(n - i - 1) * 28:(n - i) * 28, j * 28:(j + 1) * 28] = x[0].reshape(28, 28)
-            plt.figure(figsize=(8, 10))
-            plt.axis('off')
-            plt.imshow(canvas, origin='upper', cmap='gray')
-            plt.savefig('vae_%s.png' % (datetime.now().strftime('%d_%m_%Y_%H_%M'),))
+            for y in range(10):
+                for i, xi in enumerate(x_axis):
+                    for j, yi in enumerate(y_axis):
+                        randz = np.array([[xi, yi]] * 1)
+                        yarr = np.zeros(shape=[1, 10])
+                        yarr[:, y] = 1.
+                        x = sess.run(gen_x, feed_dict={self.randz: randz, self.inputy: yarr})
+                        canvas[(n - i - 1) * 28:(n - i) * 28, j * 28:(j + 1) * 28] = x[0].reshape(28, 28)
+                plt.figure(figsize=(8, 10))
+                plt.axis('off')
+                plt.imshow(canvas, origin='upper', cmap='gray')
+                plt.savefig(os.path.join(fig_dir, 'cvae_digit%d_%s.png' % (y, dtime)))
 
 
 def main(_):
-    vae = VAEMnist()
+    vae = CVAEMnist()
     if FLAGS.train:
         vae.train()  # training
     else:
