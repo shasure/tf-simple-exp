@@ -64,8 +64,8 @@ def init_or_load_var(saver, sess, ckpt_dir, global_step_tensor, initializer=xavi
             sess.run(global_step_tensor.assign(global_step))
     else:
         init_op = tf.global_variables_initializer()
-        if not initializer:
-            tf.get_variable_scope().set_initializer(xavier_init)
+        if initializer:
+            tf.get_variable_scope().set_initializer(initializer)
         sess.run(init_op)
 
 
